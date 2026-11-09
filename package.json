@@ -1,15 +1,16 @@
 {
-  "name": "mcp01-google-fetcher",
-  "version": "1.0.0",
-  "description": "A Model Context Protocol (MCP) server that connects to google.com, fetches HTML source, and stores it locally.",
+  "name": "mcp01-kamwo-escript",
+  "version": "1.1.0",
+  "description": "Model Context Protocol (MCP) server for Kamwo Meridian Escript portal, TCM dispensary services, and page fetching.",
   "main": "index.js",
   "bin": {
-    "mcp01-google-fetcher": "./index.js",
+    "mcp01-kamwo-escript": "./index.js",
     "mcp01": "./index.js"
   },
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "start:sse": "node server.js"
   },
   "repository": {
     "type": "git",
@@ -18,12 +19,15 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
-    "antigravity",
-    "google-fetcher"
+    "kamwo",
+    "escript",
+    "tcm",
+    "antigravity"
   ],
   "author": "hirenputu",
   "license": "PolyForm-Noncommercial-1.0.0",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.2"
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "express": "^4.21.2"
   }
 }
