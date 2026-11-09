@@ -1,0 +1,6 @@
+*.log
+google.html
+*.html
+*token*
+*TOKEN*
+.git
