@@ -73,7 +73,7 @@ const KAMWO_ESCRIPT_PORTAL_DATA = {
 const server = new Server(
   {
     name: "mcp01-kamwo-escript",
-    version: "1.1.0",
+    version: "1.2.0",
   },
   {
     capabilities: {

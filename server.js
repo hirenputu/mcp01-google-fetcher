@@ -15,6 +15,7 @@ const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 3001;
 const HOST = "127.0.0.1";
 const TARGET_DIR = process.env.MCP_OUTPUT_DIR || "/var/www/html/mcp01";
+const MCP_API_KEY = process.env.MCP_API_KEY;
 
 function log(level, message, meta = "") {
   const ts = new Date().toISOString();
@@ -26,51 +27,92 @@ function logError(message, err) {
   console.error(`[${ts}] [ERROR] ${message}`, err || "");
 }
 
+// Authentication middleware for MCP endpoints
+function authenticate(req, res, next) {
+  if (!MCP_API_KEY) {
+    return next();
+  }
+
+  // 1. Check Authorization: Bearer <token> or X-API-Key header
+  const authHeader = req.headers["authorization"] || req.headers["x-api-key"];
+  if (authHeader) {
+    const token = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7).trim()
+      : authHeader.trim();
+    if (token === MCP_API_KEY) {
+      return next();
+    }
+  }
+
+  // 2. Check query parameter: ?token=<token>
+  if (req.query.token && req.query.token.trim() === MCP_API_KEY) {
+    return next();
+  }
+
+  const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+  log("warn", `Unauthorized access attempt from ${clientIp} to ${req.originalUrl}`);
+
+  return res.status(401).json({
+    jsonrpc: "2.0",
+    error: {
+      code: -32000,
+      message: "Unauthorized: Invalid or missing Bearer token / API key.",
+    },
+  });
+}
+
 // Structured information parsed from https://kamwo.com/escript/index.html
 const KAMWO_ESCRIPT_PORTAL_DATA = {
   organization: "Kamwo Meridian Herbs",
-  description: "Comprehensive Traditional Chinese Medicine (TCM) dispensary, herb pharmacy, and practitioner management platform.",
+  description:
+    "Comprehensive Traditional Chinese Medicine (TCM) dispensary, herb pharmacy, and practitioner management platform.",
   headquarters: {
     address: "211 Grand Street, New York, NY 10013",
     phone: "(212) 966-6370",
-    hours: "10:00 AM - 6:20 PM, 7 Days a Week"
+    hours: "10:00 AM - 6:20 PM, 7 Days a Week",
   },
   portalServices: [
     {
       name: "Escript Practitioner Portal",
       url: "https://www.kamwo.com/escript/p-public.php",
-      description: "Practitioner portal for custom herbal prescription ordering, patient formula management, and dispensary compounding."
+      description:
+        "Practitioner portal for custom herbal prescription ordering, patient formula management, and dispensary compounding.",
     },
     {
       name: "Kamwo TCM Herb Guide",
       url: "https://www.kamwo.com/escript/herbguide/herbs.html",
-      description: "Comprehensive TCM herb compendium, singles, formulas, and mobile guide application."
+      description:
+        "Comprehensive TCM herb compendium, singles, formulas, and mobile guide application.",
     },
     {
       name: "TCM Suite",
       url: "https://tcmsuite.com/",
-      description: "TCM electronic medical records (EMR), practice management, and dispensary integration system."
+      description:
+        "TCM electronic medical records (EMR), practice management, and dispensary integration system.",
     },
     {
       name: "Kamwo Herbs Online",
       url: "https://kamwoherbs.com/",
-      description: "Main website for educational resources, raw herbs, granules, and herbal supplies."
+      description:
+        "Main website for educational resources, raw herbs, granules, and herbal supplies.",
     },
     {
       name: "Kamwo Store",
       url: "https://kamwostore.com/",
-      description: "Direct retail store for herbal formulas, acupuncture supplies, and wellness products."
+      description:
+        "Direct retail store for herbal formulas, acupuncture supplies, and wellness products.",
     },
     {
       name: "AcuDirect Practitioner Directory",
       url: "https://www.acudirect.com/find-practitioner.php",
-      description: "National directory to locate licensed acupuncturists and TCM practitioners."
-    }
+      description:
+        "National directory to locate licensed acupuncturists and TCM practitioners.",
+    },
   ],
   policies: {
     privacy: "https://kamwoherbs.com/privacy-policy",
-    terms: "https://kamwoherbs.com/terms-and-conditions"
-  }
+    terms: "https://kamwoherbs.com/terms-and-conditions",
+  },
 };
 
 // Function to create a configured MCP Server instance per session
@@ -78,7 +120,7 @@ function createMcpServer() {
   const server = new Server(
     {
       name: "mcp01-kamwo-escript",
-      version: "1.1.0",
+      version: "1.2.0",
     },
     {
       capabilities: {
@@ -251,30 +293,35 @@ app.use(express.json());
 
 const transports = new Map();
 
-// Health check endpoint
+// Health check endpoint (publicly accessible for status monitors)
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     service: "mcp01-kamwo-escript",
-    version: "1.1.0",
+    version: "1.2.0",
     mode: "SSE",
+    authEnabled: !!MCP_API_KEY,
     uptime: process.uptime(),
     activeSessions: transports.size,
     kamwoPortalTarget: "https://kamwo.com/escript/index.html",
   });
 });
 
-// SSE endpoint
-app.get("/sse", async (req, res) => {
+// SSE endpoint (protected)
+app.get("/sse", authenticate, async (req, res) => {
   const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-  log("info", `New SSE connection established from ${clientIp}`);
+  log("info", `New authenticated SSE connection established from ${clientIp}`);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
 
-  const transport = new SSEServerTransport("/messages", res);
+  const messageEndpoint = req.query.token
+    ? `/messages?token=${encodeURIComponent(req.query.token)}`
+    : "/messages";
+
+  const transport = new SSEServerTransport(messageEndpoint, res);
   const server = createMcpServer();
 
   transports.set(transport.sessionId, transport);
@@ -288,8 +335,8 @@ app.get("/sse", async (req, res) => {
   await server.connect(transport);
 });
 
-// Messages POST endpoint
-app.post("/messages", async (req, res) => {
+// Messages POST endpoint (protected)
+app.post("/messages", authenticate, async (req, res) => {
   const sessionId = req.query.sessionId;
   if (!sessionId) {
     log("warn", "Missing sessionId in /messages query");
@@ -308,6 +355,6 @@ app.post("/messages", async (req, res) => {
 app.listen(PORT, HOST, () => {
   log(
     "info",
-    `Kamwo Escript MCP Server (SSE mode) listening on http://${HOST}:${PORT} | Output DIR: ${TARGET_DIR}`
+    `Kamwo Escript MCP Server v1.2.0 (SSE mode) listening on http://${HOST}:${PORT} | Auth: ${MCP_API_KEY ? "Enabled" : "Disabled"}`
   );
 });
